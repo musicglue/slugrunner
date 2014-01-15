@@ -1,0 +1,54 @@
+#!/bin/bash
+set -eo pipefail
+shopt -s dotglob
+
+tempdir=$HOME/_slug_runner_tmp
+
+mkdir -p $tempdir
+cd $tempdir
+
+if [[ $SLUG_URL ]]; then
+        curl -s "$SLUG_URL" | tar xz
+        unset SLUG_URL
+else
+        cat | tar xz
+fi
+cp -R $tempdir/app/* $HOME
+cd $HOME
+rm -rf $tempdir
+
+## Load profile.d and release config
+if [[ -d /config.d ]]; then
+    for file in /config.d/*; do
+        source $file
+    done
+fi
+
+mkdir -p .profile.d
+if [[ -f .release ]]; then
+        ruby -ryaml -e "(YAML.load_file('.release')['config_vars'] || {}).each{|k,v| puts \"#{k}='#{v}'\"}" > .profile.d/config_vars
+fi
+for file in .profile.d/*; do 
+        source $file
+done
+hash -r
+
+## Inject "start" command to run processes defined in Procfile
+
+case "$1" in
+        start)
+                if [[ -f Procfile ]]; then
+                    command="$(ruby -ryaml -e "puts YAML.load_file('Procfile')['$2']")"
+                elif [[ -f .release ]]; then
+                    command="$(ruby -ryaml -e "puts (YAML.load_file('.release')['default_process_types'] || {})['$2']")"
+		        fi
+                ;;
+
+        *)
+                command="$@"
+                ;;
+esac
+
+## Run!
+
+bash -c "$command"
